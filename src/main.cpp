@@ -5,7 +5,6 @@
 
 void signal(int)
 {
-    ARM9::Dump();
     exit(1);
 }
 
@@ -22,11 +21,12 @@ int main(int argc, char** argv)
 
     ARM9::Reset();
 
+    std::signal(SIGABRT, signal);
+    std::signal(SIGINT, signal);
+    std::atexit(ARM9::Dump);
+
     while (1)
         ARM9::Clock();
-
-    std::signal(SIGABRT, signal);
-    std::atexit(ARM9::Dump);
 
     return 0;
 }
