@@ -15,4 +15,4 @@ add_executable(nds ${SOURCES})
 
 target_include_directories(nds PRIVATE ${CMAKE_SOURCE_DIR})
 
-set_property(TARGET nds PROPERTY CXX_STANDARD 23)
+set_property(TARGET nds PROPERTY CXX_STANDARD 20)

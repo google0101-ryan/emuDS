@@ -2,23 +2,26 @@
 
 #include <src/core/arm9/arm9.h>
 
-uint8_t* arm9_bios;
+uint8_t* arm9_bios; // The ARM9 and ARM7 have different BIOSes on different chips, so we keep them in seperate arrays
 uint8_t* arm7_bios;
 
 size_t arm9_bios_size;
 size_t arm7_bios_size;
 
-uint32_t dtcm_start = 0;
-bool ime = false;
+uint32_t dtcm_start = 0; // Keep track of the ARM9's DTCM, because it can be remapped via CP15
+bool ime_arm9 = false; // IME controls whether interrupts are enabled globally, regardless of any other settings
+bool ime_arm7 = false;
 
-bool postflg_arm9 = false;
+bool postflg_arm9 = false; // POSTFLG is used for making sure that games following a stray pointer don't execute BIOS code
 bool postflg_arm7 = false;
 
-uint8_t dtcm[0x4000];
-uint8_t* arm9_ram;
+uint8_t dtcm[0x4000]; // Data Tightly-Coupled memory, ARM9 only, remappable
+uint8_t* arm9_ram; // ARM9's main RAM, PSRAM, 4MB
 
 uint16_t arm9_ipcsync; // Used for synchronization primitives between ARM9 and ARM7
 uint16_t arm7_ipcsync;
+
+uint8_t* arm7_wram[0x10000]; // 16-KiB of ARM7-exclusive WRAM
 
 void Bus::AddARMBios(std::string file_name, bool is_arm9)
 {
@@ -98,7 +101,7 @@ void Bus::Write8(uint32_t addr, uint8_t data)
 	switch (addr)
 	{
 	case 0x04000208:
-		ime = data & 1;
+		ime_arm9 = data & 1;
 		return;
 	}
 
@@ -153,12 +156,46 @@ uint8_t Bus::Read8(uint32_t addr)
     exit(1);
 }
 
+void Bus::Write8_ARM7(uint32_t addr, uint8_t data)
+{
+	switch (addr)
+	{
+	case 0x04000208:
+		ime_arm7 = data;
+		return;
+	}
+
+	printf("[emu/ARM7]: Write8 0x%02x to unknown addr 0x%08x\n", data, addr);
+	exit(1);
+}
+
+void Bus::Write32_ARM7(uint32_t addr, uint32_t data)
+{
+	if ((addr & 0xFF000000) == 0x03000000)
+	{
+		*(uint32_t*)&arm7_wram[addr & 0xFFFF] = data;
+		return;
+	}
+
+	printf("[emu/ARM7]: Write32 0x%08x to unknown addr 0x%08x\n", data, addr);
+	exit(1);
+}
+
 uint32_t Bus::Read32_ARM7(uint32_t addr)
 {
 	if (addr < arm7_bios_size)
 		return *(uint32_t*)&arm7_bios[addr];
 	
 	printf("[emu/ARM7]: Read32 from unknown addr 0x%08x\n", addr);
+	exit(1);
+}
+
+uint32_t Bus::Read16_ARM7(uint32_t addr)
+{
+	if (addr < arm7_bios_size)
+		return *(uint16_t*)&arm7_bios[addr];
+	
+	printf("[emu/ARM7]: Read16 from unknown addr 0x%08x\n", addr);
 	exit(1);
 }
 
