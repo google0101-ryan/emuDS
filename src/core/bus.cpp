@@ -6,6 +6,7 @@ uint8_t* arm9_bios;
 uint8_t* arm7_bios;
 
 size_t arm9_bios_size;
+size_t arm7_bios_size;
 
 uint32_t dtcm_start = 0;
 bool ime = false;
@@ -15,7 +16,8 @@ bool postflg_arm9 = false;
 uint8_t dtcm[0x4000];
 uint8_t* arm9_ram;
 
-uint8_t ipcsync; // Used for synchronization primitives between ARM9 and ARM7
+uint16_t arm9_ipcsync; // Used for synchronization primitives between ARM9 and ARM7
+uint16_t arm7_ipcsync;
 
 void Bus::AddARMBios(std::string file_name, bool is_arm9)
 {
@@ -33,6 +35,7 @@ void Bus::AddARMBios(std::string file_name, bool is_arm9)
     else
     {
         arm7_bios = new uint8_t[size];
+		arm7_bios_size = size;
         bios.read((char*)arm7_bios, size);
     }
 
@@ -75,7 +78,11 @@ void Bus::Write16(uint32_t addr, uint16_t data)
 	switch (addr)
 	{
 	case 0x04000180:
-		ipcsync = data & 0xF;
+		arm7_ipcsync &= 0xFFF0;
+		arm7_ipcsync |= ((data & 0x0F00) >> 8);
+		arm9_ipcsync &= 0xB0FF;
+		arm9_ipcsync |= (data & 0x4F00);
+		printf("Sending value 0x%x to ARM7\n", (data & 0x0F00) >> 8);
 		return;
 	case 0x04000204: // Ignore EXMEMCNT
 		return;
@@ -121,6 +128,12 @@ uint16_t Bus::Read16(uint32_t addr)
         return *(uint16_t*)&arm9_bios[addr - 0xFFFF0000];
 	if ((addr & 0xFF000000) == 0x02000000)
 		return *(uint16_t*)&arm9_ram[addr & 0x3FFFFF];
+	
+	switch (addr)
+	{
+	case 0x04000180:
+		return arm9_ipcsync;
+	}
 
     printf("[emu/Bus]: Read16 from unknown address 0x%08x\n", addr);
     exit(1);
@@ -137,6 +150,12 @@ uint8_t Bus::Read8(uint32_t addr)
 
     printf("[emu/Bus]: Read8 from unknown address 0x%08x\n", addr);
     exit(1);
+}
+
+uint32_t Bus::Read32_ARM7(uint32_t addr)
+{
+	if (addr < arm7_bios_size)
+		return *(uint32_t*)&arm7_bios[addr];
 }
 
 void Bus::RemapDTCM(uint32_t addr)

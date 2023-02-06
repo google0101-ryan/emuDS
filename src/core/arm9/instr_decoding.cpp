@@ -134,6 +134,31 @@ bool IsSTRH_Imm(uint16_t i)
 	return is_strh_imm;
 }
 
+bool IsBranchLink(uint16_t i)
+{
+	return ((i >> 13) & 0x7) == 0x7;
+}
+
+bool IsLoadHalfwordImmediate(uint16_t i)
+{
+	return ((i >> 11) & 0b11111) == 0b10001;
+}
+
+bool IsLSL1(uint16_t i)
+{
+	return ((i >> 11) & 0b11111) == 0;
+}
+
+bool IsLSR1(uint16_t i)
+{
+	return ((i >> 11) & 0b11111) == 1;
+}
+
+bool IsCMP2(uint16_t i)
+{
+	return ((i >> 6) & 0x3FF) == 0b0100001010;
+}
+
 bool CondPassed(uint8_t cond)
 {
     switch (cond)

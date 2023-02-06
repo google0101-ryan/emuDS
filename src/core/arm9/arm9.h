@@ -51,6 +51,11 @@ bool IsLDR_PCRel(uint16_t i);
 bool IsSTR_Reg(uint16_t i);
 bool IsPushPop(uint16_t i);
 bool IsSTRH_Imm(uint16_t i);
+bool IsBranchLink(uint16_t i);
+bool IsLoadHalfwordImmediate(uint16_t i);
+bool IsLSL1(uint16_t i);
+bool IsLSR1(uint16_t i);
+bool IsCMP2(uint16_t i);
 
 bool CondPassed(uint8_t cond);
 

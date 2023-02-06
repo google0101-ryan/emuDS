@@ -8,7 +8,8 @@ set(SOURCES src/main.cpp
             src/core/bus.cpp
             src/core/arm9/instr_decoding.cpp
             src/core/arm9/arm9.cpp
-            src/core/arm9/cp15.cpp)
+            src/core/arm9/cp15.cpp
+            src/core/arm7/arm7.cpp)
 
 add_executable(nds ${SOURCES})
 
