@@ -137,27 +137,44 @@ void Clock()
 			assert(!i);
 
 			uint32_t offset = instr & 0xFFF;
-
+			
+			std::string op2 = "[r" + std::to_string(rn) + ", #" + std::to_string(offset) + "]";
+			
 			uint32_t addr = GetReg(rn);
 
 			if (p)
 				addr += u ? offset : offset;
 			
-			if (l && w)
+			if (l && !b)
 			{
 				SetReg(rd, Bus::Read32_ARM7(addr));
+				printf("ldr r%d, %s\n", rd, op2.c_str());
 			}
-			else if (l && !w)
+			else if (l && b)
 			{
-
+				SetReg(rd, Bus::Read8_ARM7(addr));
+				printf("ldrb r%d, %s\n", rd, op2.c_str());
 			}
-			else if (!l && w)
+			else if (!l && b)
 			{
-
+				printf("Unhandled str\n");
+				exit(1);
 			}
 			else
 			{
-				
+				printf("Unhandled strb\n");
+				exit(1);
+			}
+
+			if (!p)
+				addr += u ? offset : -offset;
+
+			if (w)
+				SetReg(rn, addr);
+			
+			if ((!l || rd != 15) && (!w || rn != 15))
+			{
+				GetReg(15) += 2;
 			}
 		}
 		else if (IsDataProcessing(instr))

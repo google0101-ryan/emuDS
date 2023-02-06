@@ -12,6 +12,7 @@ uint32_t dtcm_start = 0;
 bool ime = false;
 
 bool postflg_arm9 = false;
+bool postflg_arm7 = false;
 
 uint8_t dtcm[0x4000];
 uint8_t* arm9_ram;
@@ -156,6 +157,21 @@ uint32_t Bus::Read32_ARM7(uint32_t addr)
 {
 	if (addr < arm7_bios_size)
 		return *(uint32_t*)&arm7_bios[addr];
+	
+	printf("[emu/ARM7]: Read32 from unknown addr 0x%08x\n", addr);
+	exit(1);
+}
+
+uint8_t Bus::Read8_ARM7(uint32_t addr)
+{
+	switch (addr)
+    {
+    case 0x04000300:
+        return postflg_arm7;
+    }
+
+    printf("[emu/ARM7]: Read8 from unknown address 0x%08x\n", addr);
+    exit(1);
 }
 
 void Bus::RemapDTCM(uint32_t addr)
