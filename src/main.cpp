@@ -1,6 +1,7 @@
 #include <src/core/bus.h>
 #include <src/core/arm9/arm9.h>
 #include <src/core/arm7/arm7.h>
+#include <src/core/spi/firmware.h>
 
 #include <csignal>
 
@@ -11,14 +12,16 @@ void signal(int)
 
 int main(int argc, char** argv)
 {
-    if (argc < 3)
+    if (argc < 4)
     {
-        printf("Usage: %s <arm9 bios> <arm7 bios>\n", argv[0]);
+        printf("Usage: %s <arm9 bios> <arm7 bios> <firmware image>\n", argv[0]);
         return 0;
     }
 
     Bus::AddARMBios(argv[1], true);
     Bus::AddARMBios(argv[2], false);
+
+	Firmware::LoadFirmware(argv[3]);
 
     ARM9::Reset();
 	ARM7::Reset();

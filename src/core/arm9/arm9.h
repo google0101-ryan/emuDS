@@ -56,6 +56,10 @@ bool IsLoadHalfwordImmediate(uint16_t i);
 bool IsLSL1(uint16_t i);
 bool IsLSR1(uint16_t i);
 bool IsCMP2(uint16_t i);
+bool IsLDR_Imm(uint16_t i);
+bool IsALUThumb(uint16_t i);
+bool IsSPRelativeLoadStore(uint16_t i);
+bool IsHiRegisterOperation(uint16_t i);
 
 bool CondPassed(uint8_t cond);
 

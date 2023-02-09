@@ -159,6 +159,26 @@ bool IsCMP2(uint16_t i)
 	return ((i >> 6) & 0x3FF) == 0b0100001010;
 }
 
+bool IsLDR_Imm(uint16_t i)
+{
+	return ((i >> 13) & 0b111) == 0b011;
+}
+
+bool IsALUThumb(uint16_t i)
+{
+	return ((i >> 10) & 0x3F) == 0b010000;
+}
+
+bool IsSPRelativeLoadStore(uint16_t i)
+{
+	return ((i >> 12) & 0xF) == 0b1001;
+}
+
+bool IsHiRegisterOperation(uint16_t i)
+{
+	return ((i >> 10) & 0x3F) == 0b010001;
+}
+
 bool CondPassed(uint8_t cond)
 {
     switch (cond)
@@ -167,6 +187,12 @@ bool CondPassed(uint8_t cond)
         return cpsr.flags.z;
     case 0b0001:
         return !cpsr.flags.z;
+	case 0b0011:
+		return !cpsr.flags.c;
+	case 0b1000:
+		return cpsr.flags.c && !cpsr.flags.z;
+	case 0b1010:
+		return cpsr.flags.v == cpsr.flags.n;
 	case 0b1011:
 		return cpsr.flags.v != cpsr.flags.n;
 	case 0b1100:
@@ -176,7 +202,6 @@ bool CondPassed(uint8_t cond)
         return true;
     default:
         printf("Unknown cond code %d\n", cond);
-		Dump();
         exit(1);
     }
 }

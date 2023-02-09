@@ -4,6 +4,9 @@
 #include <cassert>
 #include <cstring>
 #include <bit>
+#include <string>
+#include <sstream>
+#include "arm9.h"
 
 namespace ARM9
 {
@@ -104,6 +107,13 @@ unsigned int countSetBits(unsigned int n)
     return count;
 }
 
+std::string convert_int(int n)
+{
+   std::stringstream ss;
+   ss << std::hex << n;
+   return ss.str();
+}
+
 void ThumbPush(uint16_t i)
 {
 	uint8_t reg_list = i & 0xff;
@@ -126,7 +136,7 @@ void ThumbPush(uint16_t i)
 		}
 	}
 
-	if (i & (1 << 8))
+	if (r)
 	{
 		Bus::Write32(op0, GetReg(14));
 		regs += "lr, ";
@@ -136,12 +146,53 @@ void ThumbPush(uint16_t i)
 	regs.pop_back();
 
 	// printf("push { %s }\n", regs.c_str());
+
+	GetReg(15) += 2;
 	
 }
 
-template<class T>
-T sign_extend(T x, const int bits) {
-    T m = 1;
+void ThumbPop(uint16_t i)
+{
+	uint8_t reg_list = i & 0xff;
+	bool r = (i >> 8) & 1;
+
+	uint32_t addr = GetReg(13);
+
+	std::string regs;
+
+	for (int i = 7; i >= 0; i--)
+	{
+		if (reg_list & (1 << i))
+		{
+			regs += "r" + std::to_string(i) + ", ";
+			SetReg(i, Bus::Read32(addr));
+			addr += 4;
+		}
+	}
+
+
+	regs.pop_back();
+	regs.pop_back();
+
+	if (r)
+	{
+		regs += ", pc";
+		SetReg(15, Bus::Read32(addr) & ~1);
+		FlushPipeline();
+		addr += 4;
+	}
+	else
+		GetReg(15) += 2;
+
+	SetReg(13, addr);
+	
+	// printf("pop {%s}\n", regs.c_str());
+}
+
+template <class T>
+T sign_extend(T x, const int bits)
+{
+	T m = 1;
     m <<= bits - 1;
     return (x ^ m) - m;
 }
@@ -150,8 +201,8 @@ void Clock()
 {
     if (is_thumb)
     {
-		// printf("0x%08x: ", GetReg(15) - 4);
 		uint16_t instr = AdvanceThumbPipeline();
+		// printf("0x%08x (0x%04x): ", GetReg(15) - 6, instr);
 
 		if (IsArithmeticThumb(instr))
 		{
@@ -165,6 +216,18 @@ void Clock()
 			{
 				SetReg(rd, offset8);
 				// printf("mov r%d, #%d\n", rd, offset8);
+				break;
+			}
+			case 0x01:
+			{
+				uint32_t result = GetReg(rd) + offset8;
+
+				cpsr.flags.c = !OverflowFrom(GetReg(rd), -offset8);
+				cpsr.flags.z = (result == 0);
+				cpsr.flags.n = (result >> 31) & 1;
+				cpsr.flags.v = OverflowFrom(GetReg(rd), -offset8);
+
+				// printf("cmp r%d, #%d\n", rd, offset8);
 				break;
 			}
 			case 0x02:
@@ -265,20 +328,18 @@ void Clock()
 			bool l = (instr >> 11) & 1;
 			if (l)
 			{
-				assert(0);
+				ThumbPop(instr);
 			}
 			else
 			{
 				ThumbPush(instr);
 			}
-
-			GetReg(15) += 2;
 		}
 		else if (IsSTRH_Imm(instr))
 		{
 			uint8_t rd = instr & 0x7;
 			uint8_t rn = (instr >> 3) & 0x7;
-			uint8_t imm5 = ((instr >> 6) & 0x1F) << 2;
+			uint8_t imm5 = ((instr >> 6) & 0x1F) << 1;
 			
 			std::string disasm = "strh r" + std::to_string(rd) + ", [r"
 				+ std::to_string(rn);
@@ -351,7 +412,7 @@ void Clock()
 		{
 			uint8_t rd = instr & 0x7;
 			uint8_t rm = (instr >> 3) & 0x7;
-			uint8_t imm5 = ((instr >> 6) & 0x1F) << 1;
+			uint8_t imm5 = ((instr >> 6) & 0x1F);
 
 			if (!imm5)
 				SetReg(rd, GetReg(rm));
@@ -372,9 +433,10 @@ void Clock()
 		}
 		else if (IsLSR1(instr))
 		{
+			static bool alreadyDone = false;
 			uint8_t rd = instr & 0x7;
 			uint8_t rm = (instr >> 3) & 0x7;
-			uint8_t imm5 = ((instr >> 6) & 0x1F) << 1;
+			uint8_t imm5 = ((instr >> 6) & 0x1F);
 
 			if (!imm5)
 			{
@@ -410,6 +472,117 @@ void Clock()
 			// printf("cmp r%d, r%d\n", rn, rm);
 
 			GetReg(15) += 2;
+		}
+		else if (IsLDR_Imm(instr))
+		{
+			bool b = (instr >> 12) & 1;
+			bool l = (instr >> 11) & 1;
+
+			uint8_t offset5 = ((instr >> 6) & 0x1F);
+
+			uint8_t rb = (instr >> 3) & 7;
+			uint8_t rd = instr & 7;
+
+			if (!b)
+				offset5 <<= 2;
+
+			uint32_t addr = GetReg(rb) + offset5;
+
+			if (l)
+			{
+				assert(0);
+			}
+			else
+			{
+				// printf("str%s r%d, [r%d, #%d]\n", b ? "b" : "", rd, rb, offset5);
+
+				if (!b)
+					Bus::Write32(addr, GetReg(rd));
+				else
+					Bus::Write8(addr, GetReg(rd));
+			}
+
+			GetReg(15) += 2;
+		}
+		else if (IsALUThumb(instr))
+		{
+			uint8_t op = (instr >> 6) & 0xF;
+			uint8_t rs = (instr >> 3) & 0x7;
+			uint8_t rd = instr & 0x7;
+
+			switch (op)
+			{
+			case 0xF:
+			{
+				uint32_t result = ~GetReg(rs);
+
+				cpsr.flags.n = (result >> 31) & 1;
+				cpsr.flags.z = (result == 0);
+
+				SetReg(rd, result);
+				// printf("mvn r%d, r%d\n", rd, rs);
+				break;
+			}
+			default:
+				// printf("Unknown THUMB ALU op 0x%x\n", op);
+				exit(1);
+			}
+
+			GetReg(15) += 2;
+		}
+		else if (IsSPRelativeLoadStore(instr))
+		{
+			bool l = (instr >> 11) & 1;
+			uint8_t rd = (instr >> 8) & 0x7;
+			uint8_t word8 = instr & 0xff;
+
+			if (l)
+			{
+				// printf("ldr r%d, [sp", rd);
+				if (word8)
+					// printf(", #%d", word8);
+				// printf("]\n");
+				SetReg(rd, Bus::Read32(GetReg(13) + word8));
+			}
+			else
+			{
+				// printf("str r%d, [sp", rd);
+				if (word8)
+					// printf(", #%d", word8);
+				// printf("]\n");
+				Bus::Write32(GetReg(13) + word8, GetReg(rd));
+			}
+
+			GetReg(15) += 2;
+		}
+		else if (IsHiRegisterOperation(instr))
+		{
+			uint8_t op = (instr >> 8) & 0b11;
+			bool h1 = (instr >> 7) & 1;
+			bool h2 = (instr >> 6) & 1;
+			uint8_t rs = (instr >> 3) & 7;
+			uint8_t rd = instr & 7;
+
+			if (h1)
+				rd += 8;
+			if (h2)
+				rs += 8;
+			
+			switch (op)
+			{
+			case 2:
+				SetReg(rd, GetReg(rs));
+				// printf("mov r%d, r%d\n", rd, rs);
+				break;
+			default:
+				// printf("Unknown THUMB Hi-op 0x%x\n", op);
+				exit(1);
+			}
+
+			if ((rd != 15 || op == 1) && op != 3)
+				GetReg(15) += 2;
+			else
+				FlushPipeline();
 		}
 		else
 		{
@@ -479,28 +652,40 @@ void Clock()
 			std::string regs;
 			bool modified_pc = false;
 
-			for (int i = 0; i < 16; i++)
+			if (l)
 			{
-				if (reg_list & (1 << i))
+				for (int i = 15; i >= 0; i--)
 				{
-					if (i == 15)
-						modified_pc = true;
-					regs += "r" + std::to_string(i) + ", ";
+					if (reg_list & (1 << i))
+					{
+						regs += "r" + std::to_string(i) + ", ";
 
-					if (p)
-						addr += u ? 4 : -4;
-					
-					if (l)
-					{
+						if (p)
+							addr += u ? 4 : -4;
+						
 						SetReg(i, Bus::Read32(addr));
-					}
-					else
-					{
-						Bus::Write32(addr, GetReg(i));
-					}
 					
-					if (!p)
-						addr += u ? 4 : -4;
+						if (!p)
+							addr += u ? 4 : -4;
+					}
+				}
+			}
+			else
+			{
+				for (int i = 0; i < 16; i++)
+				{
+					if (reg_list & (1 << i))
+					{
+						regs += "r" + std::to_string(i) + ", ";
+
+						if (p)
+							addr += u ? 4 : -4;
+						
+						Bus::Write32(addr, GetReg(i));
+					
+						if (!p)
+							addr += u ? 4 : -4;
+					}
 				}
 			}
 
@@ -513,8 +698,12 @@ void Clock()
 			if (!l || !modified_pc)
 			{
 				if (!w || rn != 15)
-					GetReg(15) += 2;
+					GetReg(15) += 4;
+				else
+					FlushPipeline();
 			}
+			else
+				FlushPipeline();
 
 			if (rn == 13)
 			{
@@ -587,7 +776,7 @@ void Clock()
 				}
 			}
 
-			// printf("r%d, {%s}\n", rn, regs.c_str());
+			// printf("r%d%s, {%s}\n", rn, w ? "!" : "", regs.c_str());
 		}
         else if (IsBranchAndLink(instr))
         {
@@ -625,7 +814,7 @@ void Clock()
 			uint8_t rd = (instr >> 12) & 0xF;
 			
 			uint8_t offset = instr & 0xF;
-			offset |= (instr >> 8) & 0xF;
+			offset |= ((instr >> 8) & 0xF) << 4;
 
 			uint32_t addr = GetReg(rn);
 
@@ -924,17 +1113,21 @@ void Clock()
 						switch (shift_type)
 						{
 						case 0:
+							if (s)
+								cpsr.flags.c = (second_op & (1 << (32 - shamt))) != 0;
 							second_op <<= shamt;
+							op2_disasm += ", lsl #" + std::to_string(shamt);
 							break;
 						case 1:
+							if (s)
+								cpsr.flags.c = (second_op & (1 << (shamt - 1))) != 0;
 							second_op >>= shamt;
+							op2_disasm += ", lsr #" + std::to_string(shamt);
 							break;
 						default:
 							// printf("Unknown shift type %d\n", shift_type);
 							exit(1);
 						}
-						
-						op2_disasm += ", #" + std::to_string(shamt);
 					}
 				}
             }
@@ -985,10 +1178,11 @@ void Clock()
             }
             case 0x0a:
             {
-                uint64_t result = GetReg(rn) - second_op;
+                uint32_t result = GetReg(rn) - second_op;
 
-                cpsr.flags.c = (result >> 32);
-                cpsr.flags.z = (result & 0xffffffff) == 0;
+                cpsr.flags.c = !OverflowFrom(GetReg(rn), -second_op);
+                cpsr.flags.v = OverflowFrom(GetReg(rn), -second_op);
+                cpsr.flags.z = (result == 0);
                 cpsr.flags.n = (result >> 31) & 1;
 
                 // printf("cmp r%d, %s\n", rn, op2_disasm.c_str());
@@ -997,7 +1191,14 @@ void Clock()
             case 0xd:
             {
                 SetReg(rd, second_op);
-                // printf("mov r%d, %s\n", rd, op2_disasm.c_str());
+
+				if (s)
+				{
+					cpsr.flags.z = (second_op == 0);
+					cpsr.flags.n = (second_op >> 31) & 1;
+				}
+
+                // printf("mov%s r%d, %s\n", s ? "s" : "", rd, op2_disasm.c_str());
                 break;
             }
             default:

@@ -9,7 +9,11 @@ set(SOURCES src/main.cpp
             src/core/arm9/instr_decoding.cpp
             src/core/arm9/arm9.cpp
             src/core/arm9/cp15.cpp
-            src/core/arm7/arm7.cpp)
+            src/core/arm7/arm7.cpp
+			src/core/gpu/gpu.cpp
+			src/core/spi/rtc.cpp
+			src/core/spi/cart.cpp
+			src/core/spi/firmware.cpp)
 
 add_executable(nds ${SOURCES})
 
