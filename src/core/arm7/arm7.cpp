@@ -22,6 +22,9 @@ ARM9::PSR cpsr, *cur_spsr, spsr_fiq, spsr_svc, spsr_abr, spsr_irq, spsr_und;
 uint32_t pipeline[2];
 uint16_t pipeline_t[2];
 
+bool is_direct_booted = false;
+bool can_disassemble = false;
+
 uint32_t& GetReg(int r)
 {
 	return *registers[r];
@@ -66,8 +69,33 @@ uint32_t AdvanceThumbPipeline()
 	return i;
 }
 
+void DirectBoot(uint32_t entry)
+{
+	for (int i = 0; i < 16; i++)
+		registers[i] = &regs_sys[i];
+	
+	memset(regs_sys, 0, sizeof(regs_sys));
+
+	cpsr.val = 0;
+	cpsr.flags.mode = 0x1F;
+
+	SetReg(15, entry);
+	SetReg(12, entry);
+
+	SetReg(13, 0x0380FD80);
+	r_irq[13] = 0x0380FF80;
+	r_svc[13] = 0x0380FFC0;
+
+	is_direct_booted = true;
+
+	FlushPipeline();
+}
+
 void Reset()
 {
+	if (is_direct_booted)
+		return;
+
 	for (int i = 0; i < 16; i++)
 		registers[i] = &regs_sys[i];
 	
@@ -105,6 +133,8 @@ bool CondPassed(uint8_t condition)
 		return cpsr.flags.n != cpsr.flags.v;
 	case 0b1100:
 		return !cpsr.flags.z && (cpsr.flags.n == cpsr.flags.v);
+	case 0b1101:
+		return cpsr.flags.z || (cpsr.flags.n != cpsr.flags.v);
 	case 0b1110:
 		return true;
 	default:
@@ -142,11 +172,29 @@ unsigned int countSetBits(unsigned int n)
 
 void Clock()
 {
+	if (Bus::IsInterruptAvailable7() && cpsr.flags.i)
+	{
+		uint32_t value = cpsr.val;
+		spsr_irq.val = cpsr.val;
+
+		r_irq[0] = GetReg(15) + ((cpsr.flags.t) ? 2 : 0);
+		registers[13] = &r_irq[0];
+		registers[14] = &r_irq[1];
+		cur_spsr = &spsr_irq;
+		cpsr.flags.mode = 0x12;
+		cpsr.flags.i = 0;
+		cpsr.flags.t = 0;
+		SetReg(15, 0x18);
+		FlushPipeline();
+		printf("Handling interrupt!\n");
+	}
+
 	if (cpsr.flags.t)
 	{
 		uint16_t instr = AdvanceThumbPipeline();
 
-		printf("(0x%08x) 0x%04x: ", GetReg(15) - 4, instr);
+		if (can_disassemble)
+			printf("(0x%08x) 0x%04x: ", GetReg(15) - 4, instr);
 
 		if (IsMovCmpSubAdd(instr))
 		{
@@ -158,7 +206,8 @@ void Clock()
 			{
 			case 0x00:
 				SetReg(rd, imm);
-				printf("mov r%d, #%d\n", rd, imm);
+				if (can_disassemble)
+					printf("mov r%d, #%d\n", rd, imm);
 				break;
 			case 0x01:
 			{
@@ -169,7 +218,8 @@ void Clock()
 				cpsr.flags.c = !OverflowFrom(GetReg(rd), -imm);
 				cpsr.flags.v = OverflowFrom(GetReg(rd), -imm);
 
-				printf("cmp r%d, #%d\n", rd, imm);
+				if (can_disassemble)
+					printf("cmp r%d, #%d\n", rd, imm);
 				break;
 			}
 			case 0x02:
@@ -181,7 +231,8 @@ void Clock()
 				cpsr.flags.c = !OverflowFrom(GetReg(rd), imm);
 				cpsr.flags.v = OverflowFrom(GetReg(rd), imm);
 
-				printf("add r%d, #%d\n", rd, imm);
+				if (can_disassemble)
+					printf("add r%d, #%d\n", rd, imm);
 
 				SetReg(rd, result);
 				break;
@@ -195,7 +246,8 @@ void Clock()
 				cpsr.flags.c = !OverflowFrom(GetReg(rd), -imm);
 				cpsr.flags.v = OverflowFrom(GetReg(rd), -imm);
 
-				printf("sub r%d, #%d\n", rd, imm);
+				if (can_disassemble)
+					printf("sub r%d, #%d\n", rd, imm);
 
 				SetReg(rd, result);
 				break;
@@ -242,8 +294,9 @@ void Clock()
 				}
 				else
 					GetReg(15) += 2;
-
-				printf("pop {%s}\n", registers.c_str());
+				
+				if (can_disassemble)
+					printf("pop {%s}\n", registers.c_str());
 
 				SetReg(13, addr);
 			}
@@ -258,15 +311,17 @@ void Clock()
 
 				SetReg(13, addr);
 
-				printf("push {");
+				if (can_disassemble)
+					printf("push {");
 
 				for (int i = 0; i < 8; i++)
 				{
 					if (reg_list & (1 << i))
 					{
-						printf("r%d", i);
+						if (can_disassemble)
+							printf("r%d", i);
 						regs++;
-						if (regs != reg_count)
+						if (regs != reg_count && can_disassemble)
 							printf(", ");
 						Bus::Write32_ARM7(addr, GetReg(i));
 						addr += 4;
@@ -277,10 +332,13 @@ void Clock()
 				{
 					Bus::Write32_ARM7(addr, GetReg(14));
 					addr += 4;
-					printf(", lr");
+					
+					if (can_disassemble)
+						printf(", lr");
 				}
 
-				printf("}\n");
+				if (can_disassemble)
+					printf("}\n");
 
 				GetReg(15) += 2;
 			}
@@ -295,7 +353,8 @@ void Clock()
 			uint32_t addr = GetReg(rb);
 			addr += imm;
 
-			printf("%s r%d, [r%d, #%d]\n", l ? "ldrh" : "strh", rd, rb, imm);
+			if (can_disassemble)
+				printf("%s r%d, [r%d, #%d]\n", l ? "ldrh" : "strh", rd, rb, imm);
 
 			if (l)
 			{
@@ -319,7 +378,8 @@ void Clock()
 
 			SetReg(rd, Bus::Read32_ARM7(base));
 
-			printf("ldr r%d, _0x%08x\n", rd, base);
+			if (can_disassemble)
+				printf("ldr r%d, _0x%08x\n", rd, base);
 
 			GetReg(15) += 2;
 		}
@@ -338,21 +398,25 @@ void Clock()
 			if (!l && !b)
 			{
 				Bus::Write32_ARM7(addr, GetReg(rd));
-				printf("str r%d, [r%d, r%d]\n", rd, rb, ro);
+				if (can_disassemble)
+					printf("str r%d, [r%d, r%d]\n", rd, rb, ro);
 			}
 			else if (l && !b)
 			{
 				SetReg(rd, Bus::Read32_ARM7(addr));
-				printf("ldr r%d, [r%d, r%d]\n", rd, rb, ro);
+				if (can_disassemble)
+					printf("ldr r%d, [r%d, r%d]\n", rd, rb, ro);
 			}
 			else if (l && b)
 			{
 				SetReg(rd, Bus::Read8_ARM7(addr));
-				printf("ldrb r%d, [r%d, r%d]\n", rd, rb, ro);
+				if (can_disassemble)
+					printf("ldrb r%d, [r%d, r%d]\n", rd, rb, ro);
 			}
 			else
 			{
-				printf("Unhandled l %d b %d combo\n", l, b);
+				if (can_disassemble)
+					printf("Unhandled l %d b %d combo\n", l, b);
 				exit(1);
 			}
 
@@ -363,7 +427,8 @@ void Clock()
 			uint8_t cond = ((instr >> 8) & 0xF);
 			int32_t offset = sign_extend<int32_t>((instr & 0xff) << 1, 9);
 
-			printf("b 0x%08x\n", GetReg(15) + offset);
+			if (can_disassemble)
+				printf("b 0x%08x\n", GetReg(15) + offset);
 
 			if (!CondPassed(cond))
 			{
@@ -392,7 +457,8 @@ void Clock()
 			{
 			case 2:
 			{
-				printf("mov r%d, r%d\n", rd, rs);
+				if (can_disassemble)
+					printf("mov r%d, r%d\n", rd, rs);
 
 				SetReg(rd, GetReg(rs) & ~1);
 
@@ -405,7 +471,8 @@ void Clock()
 			}
 			case 3:
 			{
-			 	printf("bx r%d\n", rs);
+			 	if (can_disassemble)
+					printf("bx r%d\n", rs);
 			
 			 	uint32_t addr = GetReg(rs);
 
@@ -434,7 +501,8 @@ void Clock()
 
 				GetReg(15) += 2;
 
-				printf("\n");
+				if (can_disassemble)
+					printf("\n");
 			}
 			else
 			{
@@ -445,7 +513,8 @@ void Clock()
 
 				FlushPipeline();
 
-				printf("bl 0x%08x\n", lr + imm);
+				if (can_disassemble)
+					printf("bl 0x%08x\n", lr + imm);
 			}
 		}
 		else if (IsMoveShifted(instr))
@@ -460,19 +529,22 @@ void Clock()
 			case 0:
 				cpsr.flags.c = (GetReg(rs) & (1 << (32 - imm5))) != 0;
 				SetReg(rd, GetReg(rs) << imm5);
-				printf("lsl r%d, r%d, #%d\n", rd, rs, imm5);
+				if (can_disassemble)
+					printf("lsl r%d, r%d, #%d\n", rd, rs, imm5);
 				break;
 			case 1:
 				cpsr.flags.c = (GetReg(rs) & (1 << (imm5 - 1))) != 0;
 				SetReg(rd, GetReg(rs) >> imm5);
-				printf("lsr r%d, r%d, #%d\n", rd, rs, imm5);
+				if (can_disassemble)
+					printf("lsr r%d, r%d, #%d\n", rd, rs, imm5);
 				break;
 			case 2:
 			{
 				int32_t v = (int32_t)GetReg(rs);
 				v >>= imm5;
 				SetReg(rd, v);
-				printf("asr r%d, r%d, #%d\n", rd, rs, imm5);
+				if (can_disassemble)
+					printf("asr r%d, r%d, #%d\n", rd, rs, imm5);
 				break;
 			}
 			default:
@@ -497,7 +569,8 @@ void Clock()
 				cpsr.flags.z = (result == 0);
 				cpsr.flags.n = (result >> 31) & 1;
 
-				printf("and r%d, r%d\n", rd, rs);
+				if (can_disassemble)
+					printf("and r%d, r%d\n", rd, rs);
 
 				SetReg(rd, result);
 				break;
@@ -509,7 +582,8 @@ void Clock()
 				cpsr.flags.z = (result == 0);
 				cpsr.flags.n = (result >> 31) & 1;
 
-				printf("eors r%d, r%d\n", rd, rs);
+				if (can_disassemble)
+					printf("eors r%d, r%d\n", rd, rs);
 
 				SetReg(rd, result);
 
@@ -523,7 +597,8 @@ void Clock()
 				cpsr.flags.n = (result >> 31) & 1;
 				cpsr.flags.c = (GetReg(rd) & (1 << (GetReg(rs) - 1))) != 0;
 
-				printf("lsl r%d, r%d\n", rd, rs);
+				if (can_disassemble)
+					printf("lsl r%d, r%d\n", rd, rs);
 
 				SetReg(rd, result);
 				break;
@@ -536,21 +611,30 @@ void Clock()
 				cpsr.flags.n = (result >> 31) & 1;
 				cpsr.flags.c = (GetReg(rd) & (1 << (32 - GetReg(rs)))) != 0;
 
-				printf("lsr r%d, r%d\n", rd, rs);
+				if (can_disassemble)
+					printf("lsr r%d, r%d\n", rd, rs);
 
 				SetReg(rd, result);
 				break;
 			}
+			case 0x09:
+				SetReg(rd, -GetReg(rs));
+				cpsr.flags.z = (GetReg(rd) == 0);
+				cpsr.flags.n = (GetReg(rd) >> 31) & 1;
+				if (can_disassemble)
+					printf("neg r%d, r%d\n", rd, rs);
+				break;
 			case 0x0a:
 			{
 				uint32_t result = GetReg(rd) - GetReg(rs);
 
 				cpsr.flags.z = (result == 0);
 				cpsr.flags.n = (result >> 31) & 1;
-				cpsr.flags.c = !OverflowFrom(GetReg(rd), -GetReg(rs));
-				cpsr.flags.v = !cpsr.flags.c;
+				cpsr.flags.c = GetReg(rs) > GetReg(rd);
+				cpsr.flags.v = OverflowFrom(GetReg(rd), -GetReg(rs));
 
-				printf("cmp r%d, r%d\n", rd, rs);
+				if (can_disassemble)
+					printf("cmp r%d, r%d\n", rd, rs);
 
 				break;
 			}
@@ -561,7 +645,22 @@ void Clock()
 				cpsr.flags.z = (result == 0);
 				cpsr.flags.n = (result >> 31) & 1;
 
-				printf("orr r%d, r%d\n", rd, rs);
+				if (can_disassemble)
+					printf("orr r%d, r%d\n", rd, rs);
+
+				SetReg(rd, result);
+
+				break;
+			}
+			case 0x0d:
+			{
+				uint32_t result = GetReg(rd) * GetReg(rs);
+
+				cpsr.flags.z = (result == 0);
+				cpsr.flags.n = (result >> 31) & 1;
+
+				if (can_disassemble)
+					printf("mul r%d, r%d\n", rd, rs);
 
 				SetReg(rd, result);
 
@@ -571,11 +670,13 @@ void Clock()
 				SetReg(rd, GetReg(rd) & ~GetReg(rs));
 				cpsr.flags.z = (GetReg(rd) == 0);
 				cpsr.flags.n = (GetReg(rd) >> 31) & 1;
-				printf("bic r%d, r%d\n", rd, rs);
+				if (can_disassemble)
+					printf("bic r%d, r%d\n", rd, rs);
 				break;
 			case 0x0f:
 				SetReg(rd, ~GetReg(rs));
-				printf("mvn r%d, r%d\n", rd, rs);
+				if (can_disassemble)
+					printf("mvn r%d, r%d\n", rd, rs);
 				break;
 			default:
 				printf("Unknown ALU op 0x%x\n", op);
@@ -584,7 +685,7 @@ void Clock()
 
 			GetReg(15) += 2;
 		}
-		else if (IsBranchLinkThumb(instr))
+		else if (LoadStoreImm(instr))
 		{
 			bool b = (instr >> 12) & 1;
 			bool l = (instr >> 11) & 1;
@@ -616,7 +717,8 @@ void Clock()
 			}
 			else if (!b && l)
 			{
-				printf("ldr r%d, [r%d, #%d]\n", rd, rb, offset5);
+				if (can_disassemble)
+					printf("ldr r%d, [r%d, #%d]\n", rd, rb, offset5);
 				SetReg(rd, Bus::Read32_ARM7(addr & ~3));
 			}
 			else
@@ -898,7 +1000,9 @@ void Clock()
 						Bus::Write32_ARM7(addr, GetReg(i));
 						
 						if (!p)
+						{
 							addr += u ? 4 : -4;
+						}
 					}
 				}
 			}
@@ -1041,17 +1145,20 @@ void Clock()
 
 			uint32_t offset = instr & 0xFFF;
 			
-			std::string op2 = "[r" + std::to_string(rn) + ", #" + std::to_string(offset) + "]";
+			std::string op2 = "[r" + std::to_string(rn) + ", #";
+			if (!u)
+				op2 += "-";
+			op2 += std::to_string(offset) + "]";
 			
 			uint32_t addr = GetReg(rn);
 
 			if (p)
-				addr += u ? offset : offset;
+				addr += u ? offset : -offset;
 			
 			if (l && !b)
 			{
 				SetReg(rd, Bus::Read32_ARM7(addr));
-				printf("ldr r%d, %s\n", rd, op2.c_str());
+				printf("ldr r%d, %s (0x%08x)\n", rd, op2.c_str(), addr);
 			}
 			else if (l && b)
 			{
@@ -1070,7 +1177,11 @@ void Clock()
 			}
 
 			if (!p)
+			{
 				addr += u ? offset : -offset;
+				if (rn != rd)
+					SetReg(rn, addr);
+			}
 
 			if (w)
 				SetReg(rn, addr);
@@ -1079,6 +1190,27 @@ void Clock()
 			{
 				GetReg(15) += 4;
 			}
+		}
+		else if (IsPSRTransferMRS(instr))
+		{
+			bool ps = (instr >> 22) & 1;
+			uint8_t rd = (instr >> 12) & 0xF;
+
+			if (ps && cur_spsr)
+			{
+				SetReg(rd, cur_spsr->val);
+				printf("mrs r%d, spsr\n", rd);
+			}
+			else
+			{
+				SetReg(rd, cpsr.val);
+				printf("mrs r%d, cpsr\n", rd);
+			}
+
+			if (rd == 15)
+				FlushPipeline();
+			else
+				GetReg(15) += 4;
 		}
 		else if (IsPSRTransferMSR(instr))
 		{
@@ -1240,6 +1372,24 @@ void Clock()
 
 			switch (opcode)
 			{
+			case 0x00:
+			{
+				printf("and%s r%d, %s\n", s ? "s" : "", rn, op2_disasm.c_str());
+
+				uint32_t a = GetReg(rn);
+				uint32_t b = op2;
+
+				uint32_t result = a & b;
+
+				if (s)
+				{
+					cpsr.flags.z = (result == 0);
+					cpsr.flags.n = (result >> 31) & 1;
+				}
+
+				SetReg(rd, result);
+				break;
+			}
 			case 0x04:
 			{
 				printf("add r%d, r%d, %s\n", rd, rn, op2_disasm.c_str());
@@ -1298,6 +1448,25 @@ void Clock()
 				cpsr.flags.v = OverflowFrom(a, -b);
 				break;
 			}
+			case 0x0C:
+			{
+				printf("orr%s r%d, %s\n", s ? "s" : "", rn, op2_disasm.c_str());
+
+				uint32_t a = GetReg(rn);
+				uint32_t b = op2;
+
+				uint32_t result = a | b;
+
+				if (s)
+				{
+					cpsr.flags.z = (result == 0);
+					cpsr.flags.n = (result >> 31) & 1;
+				}
+
+				SetReg(rd, result);
+
+				break;
+			}
 			case 0x0d:
 			{
 				printf("mov r%d, %s\n", rd, op2_disasm.c_str());
@@ -1316,6 +1485,8 @@ void Clock()
 			{
 				printf("bic r%d, %s\n", rd, op2_disasm.c_str());
 				SetReg(rd, GetReg(rn) & ~op2);
+				cpsr.flags.z = (GetReg(rd) == 0);
+				cpsr.flags.n = (GetReg(rd) >> 31) & 1;
 				break;
 			}
 			default:
@@ -1381,6 +1552,17 @@ bool IsPSRTransferMSR(uint32_t opcode)
 
 	return extractedFormat == msrFormat;
 }
+
+bool IsPSRTransferMRS(uint32_t opcode)
+{
+	uint32_t mrsFormat = 0x10F0000;
+	uint32_t formatMask = 0xFBF0000;
+
+	uint32_t extractedFormat = opcode & formatMask;
+
+	return extractedFormat == mrsFormat;
+}
+
 bool IsMovCmpSubAdd(uint16_t i)
 {
 	return ((i >> 13) & 0b111) == 0b001;
@@ -1424,7 +1606,7 @@ bool IsALUOperation(uint16_t i)
 {
 	return ((i >> 10) & 0b111111) == 0b010000;
 }
-bool IsBranchLinkThumb(uint16_t i)
+bool LoadStoreImm(uint16_t i)
 {
 	return ((i >> 13) & 0b111) == 0b011;
 }

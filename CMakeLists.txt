@@ -15,7 +15,12 @@ set(SOURCES src/main.cpp
 			src/core/spi/cart.cpp
 			src/core/spi/firmware.cpp)
 
+find_package(SDL2 REQUIRED)
+include_directories(${SDL2_INCLUDE_DIRS})
+			
 add_executable(nds ${SOURCES})
+
+target_link_libraries(nds ${SDL2_LIBRARIES})
 
 target_include_directories(nds PRIVATE ${CMAKE_SOURCE_DIR})
 

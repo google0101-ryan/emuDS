@@ -74,6 +74,13 @@ uint8_t HandleFirmwareCommands(uint8_t data)
 	return data;
 }
 
+void ResetFirmware()
+{
+	command_id = FIRM_COMMAND::NONE;
+	address = 0;
+	total_fw_args = 0;
+}
+
 void Firmware::WriteSPIData(uint32_t data)
 {
 	if (spicnt & (1 << 15))
@@ -84,9 +91,17 @@ void Firmware::WriteSPIData(uint32_t data)
 		{
 		case 1:
 			output = HandleFirmwareCommands(data);
+			if (!(spicnt & (1 << 11)))
+				ResetFirmware();
 			break;
 		default:
 			printf("Write to unknown device %d\n", selected_device);
+			exit(1);
+		}
+
+		if (spicnt & (1 << 14))
+		{
+			printf("SPI Bus interrupt!\n");
 			exit(1);
 		}
 	}

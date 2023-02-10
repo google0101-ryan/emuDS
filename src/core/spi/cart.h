@@ -11,4 +11,9 @@ uint32_t ReadROMCTRL();
 uint8_t ReadDataOut(int index);
 uint32_t ReadDataOut();
 
+void WriteAUXSPICNT(uint32_t data);
+uint32_t ReadAUXSPICNT();
+
+void Run(int cycles);
+
 }

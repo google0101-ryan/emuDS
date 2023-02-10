@@ -6,6 +6,16 @@ namespace ARM9
 
 extern PSR cpsr;
 
+bool IsMulMula(uint32_t i)
+{
+	return ((i >> 22) & 0x3F) == 0 && ((i >> 4) & 0xF) == 0b1001;
+}
+
+bool IsMullMlal(uint32_t i)
+{
+	return ((i >> 23) & 0x3F) == 1 && ((i >> 4) & 0xF) == 0b1001;
+}
+
 bool IsBranchExchange2(uint32_t i)
 {
 	uint32_t format = 0x12FFF10;
@@ -187,16 +197,30 @@ bool CondPassed(uint8_t cond)
         return cpsr.flags.z;
     case 0b0001:
         return !cpsr.flags.z;
+    case 0b0010:
+        return cpsr.flags.c;
 	case 0b0011:
 		return !cpsr.flags.c;
+	case 0b0100:
+		return cpsr.flags.n;
+	case 0b0101:
+		return !cpsr.flags.n;
+	case 0b0110:
+		return cpsr.flags.v;
+	case 0b0111:
+		return !cpsr.flags.v;
 	case 0b1000:
 		return cpsr.flags.c && !cpsr.flags.z;
+	case 0b1001:
+		return !cpsr.flags.c || cpsr.flags.z;
 	case 0b1010:
 		return cpsr.flags.v == cpsr.flags.n;
 	case 0b1011:
 		return cpsr.flags.v != cpsr.flags.n;
 	case 0b1100:
 		return !cpsr.flags.z && (cpsr.flags.n == cpsr.flags.v);
+	case 0b1101:
+		return cpsr.flags.z || (cpsr.flags.n != cpsr.flags.v);
     case 0b1110:
     case 0b1111:
         return true;

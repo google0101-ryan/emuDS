@@ -32,6 +32,8 @@ void Reset();
 void Clock();
 void Dump();
 
+bool IsMulMula(uint32_t i);
+bool IsMullMlal(uint32_t i);
 bool IsBranchExchange2(uint32_t i);
 bool IsBranchLinkExchange(uint32_t i);
 bool IsBranchExchange(uint32_t i);
@@ -41,6 +43,7 @@ bool IsSingleDataTransfer(uint32_t i);
 bool IsPSRTransferMSR(uint32_t opcode);
 bool IsHalfwordTransfer(uint32_t i);
 bool IsHalfwordTransfer2(uint32_t i);
+bool IsHalfwordTransferRegister(uint32_t i);
 bool IsDataProcessing(uint32_t i);
 bool IsCPTransfer(uint32_t i);
 
@@ -65,6 +68,8 @@ bool CondPassed(uint8_t cond);
 
 void ThumbPush(uint16_t i);
 void ThumbPop(uint16_t i);
+
+void DirectBoot(uint32_t entry);
 
 template<class T>
 T ror(T x, unsigned int moves)

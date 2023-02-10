@@ -62,6 +62,46 @@ uint32_t ReadCP15(uint32_t cn, uint32_t cm, uint32_t cp)
 	{
 		return dtcm;
 	}
+	else if (cn == 2 && cm == 0 && cp == 0)
+	{
+		return 0;
+	}
+	else if (cn == 2 && cm == 0 && cp == 1)
+	{
+		return 0;
+	}
+	else if (cn == 3 && cm == 0 && cp == 0)
+	{
+		return 0;
+	}
+	else if (cn == 3 && cm == 0 && cp == 1)
+	{
+		return 0;
+	}
+	else if (cn == 5 && cm == 0 && cp == 0)
+	{
+		return 0;
+	}
+	else if (cn == 5 && cm == 0 && cp == 1)
+	{
+		return 0;
+	}
+	else if (cn == 5 && cm == 0 && cp == 2)
+	{
+		return 0;
+	}
+	else if (cn == 5 && cm == 0 && cp == 3)
+	{
+		return 0;
+	}
+	else if (cn == 6)
+	{
+		return 0;
+	}
+	else if (cn == 9 && cm == 1 && cp == 1)
+	{
+		return 0;
+	}
 
 	printf("Read from unknown cp15 register 0,C%d,C%d,%d\n", cn, cm, cp);
 	ARM9::Dump();
